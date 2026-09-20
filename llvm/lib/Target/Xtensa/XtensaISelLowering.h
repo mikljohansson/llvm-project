@@ -106,6 +106,14 @@ public:
   EmitInstrWithCustomInserter(MachineInstr &MI,
                               MachineBasicBlock *BB) const override;
 
+  // Expands the ESP32-S3 PIE intrinsic pseudos (EE_*_P, mv_QR_P) from
+  // XtensaS3DSPInstrPseudos.td into the real encodings, resolving each
+  // immediate q-register number to a physical Q register. Defined in
+  // XtensaS3ISelLowering.cpp.
+  MachineBasicBlock *EmitDSPInstrWithCustomInserter(
+      MachineInstr &MI, MachineBasicBlock *MBB, const TargetInstrInfo &TII,
+      MachineFunction *MF, MachineRegisterInfo &MRI, DebugLoc DL) const;
+
 private:
   const XtensaSubtarget &Subtarget;
 

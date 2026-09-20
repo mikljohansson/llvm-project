@@ -1629,6 +1629,7 @@ let Predicates = [HasESP32S3Ops] in {
   }
 }
 include "XtensaS3DSPInstrInfo.td"
+include "XtensaS3DSPInstrPseudos.td"
 
 //===----------------------------------------------------------------------===//
 // DSP Instructions

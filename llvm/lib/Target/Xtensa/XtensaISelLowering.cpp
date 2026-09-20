@@ -1752,7 +1752,10 @@ MachineBasicBlock *XtensaTargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
-  default:
-    llvm_unreachable("Unexpected instr type to insert");
+  default: {
+    MachineFunction *MF = MBB->getParent();
+    MachineRegisterInfo &MRI = MF->getRegInfo();
+    return EmitDSPInstrWithCustomInserter(MI, MBB, TII, MF, MRI, DL);
+  }
   }
 }
