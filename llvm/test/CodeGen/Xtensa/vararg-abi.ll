@@ -1,4 +1,7 @@
 ; RUN: llc -mtriple=xtensa -O2 < %s | FileCheck %s
+; The second line is not a duplicate: the esp32s3 configuration is windowed and has an
+; FPU, so f32 is a legal type there and the float case below goes down a different path.
+; RUN: llc -mtriple=xtensa -mcpu=esp32s3 -O2 < %s | FileCheck %s --check-prefix=S3
 
 ; The decisive addresses of the Xtensa varargs ABI, checked one instruction at a time.
 ; vararg.ll dumps whole functions and so re-checks the scheduler on every change; this
@@ -163,6 +166,27 @@ entry:
   %v = va_arg ptr %ap, i64
   call void @llvm.va_end(ptr %ap)
   ret i64 %v
+}
+
+; A variadic argument whose value type is not an integer. va_ndx arithmetic is i32 whatever
+; the argument's type is; taking the type from the VAARG node's result instead made this
+; build an f32 ADD out of i32 operands, and llc asserted. The index is still 4 + 4 and the
+; word read is still va_reg + 4. Only the esp32s3 run reaches that path: without an FPU
+; f32 is softened to i32 before the target sees the node, so the S3 checks are the ones
+; that matter here.
+define float @va_f32(i32 %n, ...) nounwind {
+; CHECK-LABEL: va_f32:
+; CHECK:         movi a{{[0-9]+}}, 8
+; CHECK:         l32i a2,
+; S3-LABEL: va_f32:
+; S3:            movi a{{[0-9]+}}, 8
+; S3:            l32i a2,
+entry:
+  %ap = alloca [12 x i8], align 4
+  call void @llvm.va_start(ptr %ap)
+  %v = va_arg ptr %ap, float
+  call void @llvm.va_end(ptr %ap)
+  ret float %v
 }
 
 ; va_copy duplicates all three words, so the copy walks the same arguments; the original

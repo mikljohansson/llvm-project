@@ -1335,9 +1335,10 @@ SDValue XtensaTargetLowering::LowerVACOPY(SDValue Op, SelectionDAG &DAG) const {
 // LowerVASTART establishes both.
 SDValue XtensaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
   SDNode *Node = Op.getNode();
+  // The three va_list words and va_ndx are i32 whatever the argument's type is; VT is the
+  // type of the final load and of nothing else.
   EVT VT = Node->getValueType(0);
   Type *Ty = VT.getTypeForEVT(*DAG.getContext());
-  EVT PtrVT = Op.getValueType();
   SDValue InChain = Node->getOperand(0);
   SDValue VAListPtr = Node->getOperand(1);
   const Value *SV = cast<SrcValueSDNode>(Node->getOperand(2))->getValue();
@@ -1377,14 +1378,14 @@ SDValue XtensaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
   SDValue OrigIndex = VAIndex;
 
   if (ArgAlignInBytes > 4) {
-    OrigIndex = DAG.getNode(ISD::ADD, DL, PtrVT, OrigIndex,
+    OrigIndex = DAG.getNode(ISD::ADD, DL, MVT::i32, OrigIndex,
                             DAG.getConstant(ArgAlignInBytes - 1, DL, MVT::i32));
     OrigIndex =
-        DAG.getNode(ISD::AND, DL, PtrVT, OrigIndex,
+        DAG.getNode(ISD::AND, DL, MVT::i32, OrigIndex,
                     DAG.getSignedConstant(-ArgAlignInBytes, DL, MVT::i32));
   }
 
-  VAIndex = DAG.getNode(ISD::ADD, DL, PtrVT, OrigIndex,
+  VAIndex = DAG.getNode(ISD::ADD, DL, MVT::i32, OrigIndex,
                         DAG.getConstant(VASizeInBytes, DL, MVT::i32));
 
   SDValue RegAreaEnd = DAG.getConstant(6 * 4, DL, MVT::i32);
@@ -1412,10 +1413,10 @@ SDValue XtensaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
                                       MachinePointerInfo(SV));
   InChain = VAIndexStore;
 
-  SDValue Addr = DAG.getNode(ISD::SUB, DL, PtrVT, VAIndex,
+  SDValue Addr = DAG.getNode(ISD::SUB, DL, MVT::i32, VAIndex,
                              DAG.getConstant(VASizeInBytes, DL, MVT::i32));
 
-  Addr = DAG.getNode(ISD::ADD, DL, PtrVT, Array, Addr);
+  Addr = DAG.getNode(ISD::ADD, DL, MVT::i32, Array, Addr);
 
   return DAG.getLoad(VT, DL, InChain, Addr, MachinePointerInfo());
 }
