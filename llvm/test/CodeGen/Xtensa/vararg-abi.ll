@@ -109,6 +109,62 @@ entry:
   ret i32 %r
 }
 
+; One fixed word, then an i64: the caller puts it in a4:a5 because the first half has ABI
+; alignment 8, so va_ndx has to be aligned from 4 up to 8 before the argument is taken --
+; the index of the first half is therefore 8 + 4 and the address va_reg + 8. Type
+; legalization has split the va_arg into two i32 ones by the time the target sees it, so
+; the alignment can only come from the node, not from its value type.
+define i64 @va_i64_odd(i32 %n, ...) nounwind {
+; CHECK-LABEL: va_i64_odd:
+; CHECK:         movi a{{[0-9]+}}, 12
+entry:
+  %ap = alloca [12 x i8], align 4
+  call void @llvm.va_start(ptr %ap)
+  %v = va_arg ptr %ap, i64
+  call void @llvm.va_end(ptr %ap)
+  ret i64 %v
+}
+
+; Five i32 then an i64 with one fixed word: va_ndx reaches 24, the i64 does not fit in the
+; register area and is never split, so the crossing moves the whole of it to the first
+; stack word (index 32, address va_stk + 32 == argp). The align-up of va_ndx is the
+; decisive part; if its spelling changes, check that the i64 is still read from argp and
+; argp + 4, which is where GCC reads it.
+define i64 @va_i64_straddle(i32 %n, ...) nounwind {
+; CHECK-LABEL: va_i64_straddle:
+; CHECK:         addi a[[UP:[0-9]+]], a{{[0-9]+}}, 7
+; CHECK-NEXT:    movi a[[NEG:[0-9]+]], -8
+; CHECK-NEXT:    and a{{[0-9]+}}, a[[UP]], a[[NEG]]
+entry:
+  %ap = alloca [12 x i8], align 4
+  call void @llvm.va_start(ptr %ap)
+  %v0 = va_arg ptr %ap, i32
+  %v1 = va_arg ptr %ap, i32
+  %v2 = va_arg ptr %ap, i32
+  %v3 = va_arg ptr %ap, i32
+  %v4 = va_arg ptr %ap, i32
+  %q = va_arg ptr %ap, i64
+  call void @llvm.va_end(ptr %ap)
+  ret i64 %q
+}
+
+; Seven fixed words, one of them already on the stack: the first variadic word is at
+; argp + 4 (va_ndx 36), and an i64 must skip it and land at argp + 8 (va_ndx aligned up to
+; 40). 39 and 56 are (36 + 7) and the mask -8 narrowed to the bits va_ndx can have; GCC
+; reads the same i64 at argp + 8.
+define i64 @va_fixed7_i64(i32 %a1, i32 %a2, i32 %a3, i32 %a4, i32 %a5, i32 %a6, i32 %a7, ...) nounwind {
+; CHECK-LABEL: va_fixed7_i64:
+; CHECK:         addi a[[UP:[0-9]+]], a{{[0-9]+}}, 39
+; CHECK-NEXT:    movi a[[MASK:[0-9]+]], 56
+; CHECK-NEXT:    and a{{[0-9]+}}, a[[UP]], a[[MASK]]
+entry:
+  %ap = alloca [12 x i8], align 4
+  call void @llvm.va_start(ptr %ap)
+  %v = va_arg ptr %ap, i64
+  call void @llvm.va_end(ptr %ap)
+  ret i64 %v
+}
+
 ; va_copy duplicates all three words, so the copy walks the same arguments; the original
 ; and the copy must be initialised from the same va_ndx.
 define i32 @va_copy_words(i32 %n, ...) nounwind {

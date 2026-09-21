@@ -1343,8 +1343,15 @@ SDValue XtensaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
   const Value *SV = cast<SrcValueSDNode>(Node->getOperand(2))->getValue();
   SDLoc DL(Node);
   auto &TD = DAG.getDataLayout();
-  Align ArgAlignment = TD.getABITypeAlign(Ty);
-  unsigned ArgAlignInBytes = ArgAlignment.value();
+  // The alignment to apply belongs to the VAARG node, not to its value type: type
+  // legalization splits a va_arg of an i64 or a double into two i32 ones and carries the
+  // original type's ABI alignment on the first of them (see
+  // DAGTypeLegalizer::ExpandRes_VAARG), so deriving it from the -- by then i32 -- value
+  // type drops the 8-byte alignment those arguments need. The second half deliberately
+  // carries alignment 0, which aligns nothing.
+  // uint64_t, not unsigned: -ArgAlignInBytes below has to sign-extend to a valid signed
+  // 32-bit immediate.
+  uint64_t ArgAlignInBytes = Node->getConstantOperandVal(3);
   unsigned ArgSizeInBytes = TD.getTypeAllocSize(Ty);
   unsigned VASizeInBytes = llvm::alignTo(ArgSizeInBytes, 4);
 
