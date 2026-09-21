@@ -1312,6 +1312,27 @@ SDValue XtensaTargetLowering::LowerVACOPY(SDValue Op, SelectionDAG &DAG) const {
                        MachinePointerInfo(SrcSV));
 }
 
+// The va_list walk this has to reproduce is GCC's xtensa_gimplify_va_arg_expr, which is
+// the ABI: newlib's printf is GCC-compiled, so a va_list built or consumed here has to
+// agree with it word for word.
+//
+//   orig = va_ndx;
+//   if (alignof(T) > 4)                       // only i64/double/i128 reach this
+//     orig = (orig + alignof(T) - 1) & -alignof(T);
+//   ndx = orig + roundup(sizeof(T), 4);
+//   if (ndx <= 24)                            // inside the six saved argument words
+//     array = va_reg;
+//   else {
+//     if (orig <= 24)                         // the argument that crosses out
+//       ndx = 32 + roundup(sizeof(T), 4);
+//     array = va_stk;
+//   }
+//   va_ndx = ndx;
+//   addr = array + ndx - roundup(sizeof(T), 4);
+//
+// va_reg points at the first of six words (the caller's a2..a7 as the prologue spilled
+// them) and va_stk is biased so that index 32 is the first argument word on the stack;
+// LowerVASTART establishes both.
 SDValue XtensaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
   SDNode *Node = Op.getNode();
   EVT VT = Node->getValueType(0);
@@ -1359,22 +1380,26 @@ SDValue XtensaTargetLowering::LowerVAARG(SDValue Op, SelectionDAG &DAG) const {
   VAIndex = DAG.getNode(ISD::ADD, DL, PtrVT, OrigIndex,
                         DAG.getConstant(VASizeInBytes, DL, MVT::i32));
 
-  SDValue CC = DAG.getSetCC(DL, MVT::i32, OrigIndex,
-                            DAG.getConstant(6 * 4, DL, MVT::i32), ISD::SETLE);
+  SDValue RegAreaEnd = DAG.getConstant(6 * 4, DL, MVT::i32);
 
+  // The argument lies entirely inside the six-word register save area.
+  SDValue InRegArea = DAG.getSetCC(DL, MVT::i32, VAIndex, RegAreaEnd, ISD::SETLE);
+
+  // This is the argument that crosses out of the register save area: an argument is
+  // never split between the registers and the stack, so the whole of it moves to the
+  // first stack word, which va_stk's bias makes va_ndx 32. Later arguments are already
+  // on the stack and only advance by their own size -- adding the crossing offset again
+  // for each of them would space them 32 bytes further apart every time.
+  SDValue Crosses =
+      DAG.getSetCC(DL, MVT::i32, OrigIndex, RegAreaEnd, ISD::SETLE);
   SDValue StkIndex =
-      DAG.getNode(ISD::ADD, DL, PtrVT, VAIndex,
-                  DAG.getConstant(32 + VASizeInBytes, DL, MVT::i32));
+      DAG.getNode(ISD::SELECT, DL, MVT::i32, Crosses,
+                  DAG.getConstant(32 + VASizeInBytes, DL, MVT::i32), VAIndex);
 
-  CC = DAG.getSetCC(DL, MVT::i32, VAIndex, DAG.getConstant(6 * 4, DL, MVT::i32),
-                    ISD::SETLE);
+  SDValue Array =
+      DAG.getNode(ISD::SELECT, DL, MVT::i32, InRegArea, VAReg, VAStack);
 
-  SDValue Array = DAG.getNode(ISD::SELECT, DL, MVT::i32, CC, VAReg, VAStack);
-
-  VAIndex = DAG.getNode(ISD::SELECT, DL, MVT::i32, CC, VAIndex, StkIndex);
-
-  CC = DAG.getSetCC(DL, MVT::i32, VAIndex, DAG.getConstant(6 * 4, DL, MVT::i32),
-                    ISD::SETLE);
+  VAIndex = DAG.getNode(ISD::SELECT, DL, MVT::i32, InRegArea, VAIndex, StkIndex);
 
   SDValue VAIndexStore = DAG.getStore(InChain, DL, VAIndex, VarArgIndexPtr,
                                       MachinePointerInfo(SV));
